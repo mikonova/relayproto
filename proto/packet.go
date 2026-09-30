@@ -7,6 +7,8 @@ import (
 	"github.com/mikonova/relayproto/types"
 )
 
+var Signature = [4]byte{42, 34, 204, 149}
+
 // a Unified interface for both IP and Message types
 type Packet interface {
 	Encode() []byte
@@ -27,16 +29,20 @@ type MessagePacket struct {
 	Timestamp      time.Time
 	MessageLength  uint32
 	MessageContent string
+	IpStringLength uint16
+	IpString       string
 }
 
 // A default constructor for creating a message packet
-func NewMessagePacket(message string, isOutgoung bool, timestamp time.Time) MessagePacket {
+func NewMessagePacket(message string, isOutgoung bool, timestamp time.Time, IpAddr string) MessagePacket {
 	return MessagePacket{
 		PacketType:     types.Message,
 		IsOutgoung:     isOutgoung,
 		Timestamp:      timestamp,
 		MessageLength:  uint32(len([]byte(message))),
 		MessageContent: message,
+		IpString:       IpAddr,
+		IpStringLength: uint16(len([]byte(IpAddr))),
 	}
 }
 
@@ -67,6 +73,8 @@ func (msgPacket MessagePacket) Encode() (packet []byte) {
 	packet = append(packet, byteTime...)
 	binary.BigEndian.AppendUint32(packet, msgPacket.MessageLength)
 	packet = append(packet, []byte(msgPacket.MessageContent)...)
+	binary.BigEndian.AppendUint16(packet, msgPacket.IpStringLength)
+	packet = append(packet, []byte(msgPacket.IpString)...)
 	return
 }
 
@@ -111,7 +119,9 @@ func Decode(packet []byte) (p Packet) {
 		timestamp.UnmarshalBinary(packet[4 : timelen+4])
 		msgPacket.Timestamp = timestamp
 		msglen := binary.BigEndian.Uint32(packet[timelen+4 : timelen+4+4])
+		msgPacket.MessageLength = msglen
 		msgPacket.MessageContent = string(packet[timelen+8 : msglen+uint32(timelen)+8])
+
 		return msgPacket
 	}
 }
