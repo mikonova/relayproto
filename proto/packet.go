@@ -7,7 +7,8 @@ import (
 	"github.com/mikonova/relayproto/types"
 )
 
-var Signature = [4]byte{42, 34, 204, 149}
+// "magic cookie, aka signature"
+var Signature = []byte{42, 34, 204, 149}
 
 // a Unified interface for both IP and Message types
 type Packet interface {
@@ -58,6 +59,7 @@ func NewIpPacket(ipAddr string) IpPacket {
 // Encode data to binary format ready for sending
 func (msgPacket MessagePacket) Encode() (packet []byte) {
 	packet = make([]byte, 0)
+	packet = append(packet, Signature...)
 	packet = append(packet, msgPacket.PacketType)
 	if msgPacket.IsOutgoung == true {
 		packet = append(packet, 1)
@@ -81,6 +83,7 @@ func (msgPacket MessagePacket) Encode() (packet []byte) {
 // Encode data to binary format ready for sending
 func (ipPacket IpPacket) Encode() (packet []byte) {
 	packet = make([]byte, 0)
+	packet = append(packet, Signature...)
 	packet = append(packet, ipPacket.PacketType)
 	binary.BigEndian.AppendUint16(packet, ipPacket.IpStringLength)
 	packet = append(packet, []byte(ipPacket.IpString)...)
@@ -89,39 +92,39 @@ func (ipPacket IpPacket) Encode() (packet []byte) {
 
 // A unified decoding function, which returns IpPacket, MessagePacket or nil (in case of an invalid type).
 // A valid type, being not the message will return the IpPacket with the type within the binary.
-func Decode(packet []byte) (p Packet) {
-	switch packet[0] {
+func Decode(packet []byte) (p Packet, signature []byte) {
+	switch packet[4] {
 	case types.IpCarrier:
 		return IpPacket{
 			PacketType:     types.IpCarrier,
-			IpStringLength: binary.BigEndian.Uint16(packet[1:3]),
-			IpString:       string(packet[3:]),
-		}
+			IpStringLength: binary.BigEndian.Uint16(packet[4:6]),
+			IpString:       string(packet[6:]),
+		}, packet[0:4]
 	default:
 		if packet[0] > types.OnReceiveFail {
 			println("packet didn't pass the inspection - unknown type")
-			return nil
-		} else if packet[0] != types.Message {
+			return nil, packet[0:4]
+		} else if packet[4] != types.Message {
 			return IpPacket{
-				PacketType: packet[0],
-			}
+				PacketType: packet[4],
+			}, packet[0:4]
 		}
 		msgPacket := MessagePacket{
 			PacketType: packet[0],
 		}
-		if packet[1] == 1 {
+		if packet[5] == 1 {
 			msgPacket.IsOutgoung = true
 		} else {
 			msgPacket.IsOutgoung = false
 		}
 		var timestamp time.Time
-		timelen := binary.BigEndian.Uint16(packet[2:4])
-		timestamp.UnmarshalBinary(packet[4 : timelen+4])
+		timelen := binary.BigEndian.Uint16(packet[6:8])
+		timestamp.UnmarshalBinary(packet[8 : timelen+8])
 		msgPacket.Timestamp = timestamp
-		msglen := binary.BigEndian.Uint32(packet[timelen+4 : timelen+4+4])
+		msglen := binary.BigEndian.Uint32(packet[timelen+8 : timelen+8+4])
 		msgPacket.MessageLength = msglen
-		msgPacket.MessageContent = string(packet[timelen+8 : msglen+uint32(timelen)+8])
+		msgPacket.MessageContent = string(packet[timelen+12 : msglen+uint32(timelen)+12])
 
-		return msgPacket
+		return msgPacket, packet[0:4]
 	}
 }
