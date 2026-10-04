@@ -75,6 +75,7 @@ func (msgPacket MessagePacket) Encode() (packet []byte) {
 	packet = append(packet, []byte(msgPacket.MessageContent)...)
 	binary.BigEndian.AppendUint16(packet, msgPacket.IpStringLength)
 	packet = append(packet, []byte(msgPacket.IpString)...)
+	packet = xorMap(packet)
 	return
 }
 
@@ -84,12 +85,14 @@ func (ipPacket IpPacket) Encode() (packet []byte) {
 	packet = append(packet, ipPacket.PacketType)
 	binary.BigEndian.AppendUint16(packet, ipPacket.IpStringLength)
 	packet = append(packet, []byte(ipPacket.IpString)...)
+	packet = xorMap(packet)
 	return
 }
 
 // A unified decoding function, which returns IpPacket, MessagePacket or nil (in case of an invalid type).
 // A valid type, being not the message will return the IpPacket with the type within the binary.
 func Decode(packet []byte) (p Packet) {
+	packet = xorMap(packet)
 	switch packet[0] {
 	case types.IpCarrier:
 		return IpPacket{
@@ -121,7 +124,14 @@ func Decode(packet []byte) (p Packet) {
 		msglen := binary.BigEndian.Uint32(packet[timelen+4 : timelen+4+4])
 		msgPacket.MessageLength = msglen
 		msgPacket.MessageContent = string(packet[timelen+8 : msglen+uint32(timelen)+8])
-
 		return msgPacket
 	}
+}
+
+func xorMap(source []byte) (dest []byte) {
+	dest = make([]byte, 0)
+	for k, v := range source {
+		dest = append(dest, v^Signature[k%4])
+	}
+	return
 }
