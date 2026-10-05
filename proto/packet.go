@@ -2,99 +2,142 @@ package proto
 
 import (
 	"encoding/binary"
+	"net"
 	"time"
 
 	"github.com/mikonova/relayproto/types"
 )
 
 // "magic cookie, aka signature"
-var Signature = []byte{42, 34, 204, 149}
+var signature = []byte{42, 34, 204, 149}
 
-// a Unified interface for both IP and Message types
-type Packet interface {
-	Encode() []byte
-}
+type SignalingPacket byte
 
 // A packet for transmitting an IP
 type IpPacket struct {
-	PacketType     byte
-	IpStringLength uint16
-	IpString       string
+	PacketType byte
+	Ip         net.IP
 }
 
 // A packet for transmitting a message
 type MessagePacket struct {
 	PacketType byte
 	IsOutgoung bool
+	Ip         net.IP
 	// TimestampLength uint16
-	Timestamp      time.Time
-	MessageLength  uint32
+	Timestamp time.Time
+	//MessageLength  uint32
 	MessageContent string
-	IpStringLength uint16
-	IpString       string
 }
 
 // A default constructor for creating a message packet
-func NewMessagePacket(message string, isOutgoung bool, timestamp time.Time, IpAddr string) MessagePacket {
+func NewMessagePacket(message string, isOutgoung bool, timestamp time.Time, IpAddr net.IP) MessagePacket {
 	return MessagePacket{
 		PacketType:     types.Message,
 		IsOutgoung:     isOutgoung,
 		Timestamp:      timestamp,
-		MessageLength:  uint32(len([]byte(message))),
 		MessageContent: message,
-		IpString:       IpAddr,
-		IpStringLength: uint16(len([]byte(IpAddr))),
+		Ip:             IpAddr,
 	}
 }
 
 // A default constructor for creating an IP packet
-func NewIpPacket(ipAddr string) IpPacket {
+func NewIpPacket(ipAddr net.IP) IpPacket {
 	return IpPacket{
-		PacketType:     types.IpCarrier,
-		IpStringLength: uint16(len([]byte(ipAddr))),
-		IpString:       ipAddr,
+		PacketType: types.IpCarrier,
+		Ip:         ipAddr,
 	}
 }
 
 // Encode data to binary format ready for sending
 func (msgPacket MessagePacket) Encode() (packet []byte) {
-	packet = make([]byte, 0)
-	packet = append(packet, Signature...)
+	packetArr := [8192]byte{}
+	packet = packetArr[0:0]
+	packet = append(packet, signature...)
 	packet = append(packet, msgPacket.PacketType)
 	if msgPacket.IsOutgoung == true {
-		packet = append(packet, 1)
+		packet = append(packet, 1) // 5
 	} else {
-		packet = append(packet, 0)
+		packet = append(packet, 0) // 5
 	}
-	byteTime, err := msgPacket.Timestamp.MarshalBinary()
+
+	packet = append(packet, msgPacket.Ip...) // 6...21 (22 свободно)
+	timeArr := [256]byte{}
+	byteTime := timeArr[0:0]
+	byteTime, err := msgPacket.Timestamp.AppendBinary(byteTime)
 	if err != nil {
 		println("error marshalling the timestamp")
 	}
 
-	binary.BigEndian.AppendUint16(packet, uint16(len(byteTime)))
+	binary.BigEndian.AppendUint16(packet, uint16(len(byteTime))) // 22...23 (24 is free)
 	packet = append(packet, byteTime...)
-	binary.BigEndian.AppendUint32(packet, msgPacket.MessageLength)
-	packet = append(packet, []byte(msgPacket.MessageContent)...)
-	binary.BigEndian.AppendUint16(packet, msgPacket.IpStringLength)
-	packet = append(packet, []byte(msgPacket.IpString)...)
+
+	msgBytesArr := [8192]byte{}
+	msgBytes := msgBytesArr[0:0]
+	binary.Encode(msgBytes, binary.LittleEndian, msgPacket.MessageContent)
+	binary.BigEndian.AppendUint32(packet, uint32(len(msgBytes)))
+	packet = append(packet, []byte(msgBytes)...)
+
 	packet = XorMap(packet)
+
 	return
 }
 
 // Encode data to binary format ready for sending
 func (ipPacket IpPacket) Encode() (packet []byte) {
-	packet = make([]byte, 0)
-	packet = append(packet, Signature...)
+
+	packetBuf := [21]byte{}
+	packet = packetBuf[0:0]
+	packet = append(packet, signature...)
 	packet = append(packet, ipPacket.PacketType)
-	binary.BigEndian.AppendUint16(packet, ipPacket.IpStringLength)
-	packet = append(packet, []byte(ipPacket.IpString)...)
+	packet = append(packet, ipPacket.Ip...)
 	packet = XorMap(packet)
 	return
 }
 
-// A unified decoding function, which returns IpPacket, MessagePacket or nil (in case of an invalid type).
-// A valid type, being not the message will return the IpPacket with the type within the binary.
-func Decode(packet []byte) (p Packet, signature []byte) {
+func (sigPacket SignalingPacket) Encode(packetType byte) (packet []byte) {
+	packetBuf := [5]byte{}
+	packet = packetBuf[0:0]
+	packet = append(packet, signature...)
+	packet = append(packet, packetType)
+	return
+}
+
+func DecodeMessage(packet []byte) (msgPacket MessagePacket, sign []byte) {
+	packet = XorMap(packet)
+	sign = packet[0:4]
+	if packet[4] != types.Message {
+		panic("[ERR] inorrect packet type")
+	}
+	msgPacket = MessagePacket{
+		PacketType: types.Message,
+	}
+	if packet[5] == 0 {
+		msgPacket.IsOutgoung = true
+	} else if packet[5] == 1 {
+		msgPacket.IsOutgoung = false
+	}
+	msgPacket.Ip = packet[6:22]
+	timestampLen := binary.BigEndian.Uint16(packet[22:24])
+	lenFrame := timestampLen + 24
+	msgPacket.Timestamp.UnmarshalBinary(packet[24:lenFrame])
+	msglen := binary.BigEndian.Uint32(packet[lenFrame : lenFrame+4])
+	binary.Decode(packet[uint32(lenFrame)+4:uint32(lenFrame)+4+msglen], binary.LittleEndian, msgPacket.MessageContent)
+
+	return
+}
+
+func DecodeIP(packet []byte) (ipPacket IpPacket, sign []byte) {
+	packet = XorMap(packet)
+	sign = packet[0:4]
+	ipPacket = IpPacket{}
+	ipPacket.PacketType = packet[5]
+	ipPacket.Ip = packet[6:]
+	return
+}
+
+// Deprecated: a new version is to be released
+func Decode(packet []byte) (p Packet, sign []byte) {
 	packet = XorMap(packet)
 	switch packet[4] {
 	case types.IpCarrier:
@@ -133,10 +176,16 @@ func Decode(packet []byte) (p Packet, signature []byte) {
 }
 
 // xor map the string with the protocol signature
-func XorMap(source []byte) (dest []byte) {
-	dest = make([]byte, 0)
-	for k, v := range source {
-		dest = append(dest, v^Signature[k%4])
+func XorMap(source []byte) []byte {
+	if len(source) >= 8192 {
+		println("[ERR] source is too long")
+		return nil
 	}
-	return
+	destArr := [8192]byte{}
+	dest := destArr[0:0]
+	for k, v := range source {
+		dest = append(dest, v^signature[k%4])
+	}
+	copy(source, dest)
+	return source
 }
