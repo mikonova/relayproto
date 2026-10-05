@@ -133,7 +133,7 @@ func Decode(packet []byte) (p Packet, signature []byte) {
 }
 
 // xor map the string with the protocol signature
-func xorMap(source []byte) (dest []byte) {
+func XorMap(source []byte) (dest []byte) {
 	dest = make([]byte, 0)
 	for k, v := range source {
 		dest = append(dest, v^Signature[k%4])
