@@ -10,4 +10,7 @@ const (
 	IpCarrier
 	OnReceiveConfirm
 	OnReceiveFail
+	ClientHello
+	ServerHello
+	ClientConfirmed
 )
