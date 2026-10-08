@@ -63,5 +63,4 @@ func AllocsTest() {
 	for k, v := range allocMap {
 		println("function ", k, " avg allocs: ", v)
 	}
-	_ = sink
 }
