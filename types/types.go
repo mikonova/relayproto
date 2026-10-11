@@ -13,4 +13,6 @@ const (
 	ClientHello
 	ServerHello
 	ClientConfirmed
+	ServerInternalError
+	ServerMaxConnsReached
 )
