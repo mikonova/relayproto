@@ -25,10 +25,10 @@ func AllocsTest() {
 	ipPack := iCarrier.Encode()
 
 	allocMap["GetIp_Message"] = testing.AllocsPerRun(RUNS, func() {
-		_, _ = server.GetIp(packet, &buf)
+		_ = server.GetIp(packet, &buf)
 	})
 	allocMap["GetIp_Ip"] = testing.AllocsPerRun(RUNS, func() {
-		_, _ = server.GetIp(ipPack, &buf)
+		_ = server.GetIp(ipPack, &buf)
 	})
 	allocMap["NewMessagePacket"] = testing.AllocsPerRun(RUNS, func() {
 		_ = proto.NewMessagePacket("test message", true, time.Now(), testIpBuf[:])
