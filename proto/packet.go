@@ -2,7 +2,6 @@ package proto
 
 import (
 	"encoding/binary"
-	"net"
 	"time"
 
 	"github.com/mikonova/relayproto/types"
@@ -11,20 +10,20 @@ import (
 // "magic cookie, aka signature"
 var signature = []byte{42, 34, 204, 149}
 
-// type for signals between the server and the client, excluding IpCarrier and Message
+// type for signals between the server and the client, excluding IdCarrier and Message
 type SignalingPacket byte
 
-// A packet for transmitting an IP
-type ipPacket struct {
+// A packet for transmitting an ID
+type idPacket struct {
 	PacketType byte
-	Ip         [16]byte
+	Id         [16]byte
 }
 
 // A packet for transmitting a message
 type messagePacket struct {
 	PacketType byte
 	IsOutgoung bool
-	Ip         [16]byte
+	DestId     [16]byte
 	// TimestampLength uint16
 	Timestamp time.Time
 	//MessageLength  uint32
@@ -32,49 +31,22 @@ type messagePacket struct {
 }
 
 // A default constructor for creating a message packet
-func NewMessagePacket(message string, isOutgoung bool, timestamp time.Time, ipAddr net.IP) messagePacket {
-	switch n := len(ipAddr); n {
-	case 16:
-		return messagePacket{
-			PacketType:     types.Message,
-			IsOutgoung:     isOutgoung,
-			Timestamp:      timestamp,
-			MessageContent: message,
-			Ip:             [16]byte(ipAddr),
-		}
-	case 4:
-		ipAddr.To16()
-		return messagePacket{
-			PacketType:     types.Message,
-			IsOutgoung:     isOutgoung,
-			Timestamp:      timestamp,
-			MessageContent: message,
-			Ip:             [16]byte(ipAddr),
-		}
-	default:
-		println("[ERR] slice size is not 16 nor 4, (is ", n, ")")
-		return messagePacket{}
+func NewMessagePacket(message string, isOutgoung bool, timestamp time.Time, id [16]byte) messagePacket {
+	return messagePacket{
+		PacketType:     types.Message,
+		IsOutgoung:     isOutgoung,
+		Timestamp:      timestamp,
+		MessageContent: message,
+		DestId:         id,
 	}
 
 }
 
-// A default constructor for creating an IP packet
-func NewIpPacket(ipAddr net.IP) ipPacket {
-	switch n := len(ipAddr); n {
-	case 16:
-		return ipPacket{
-			PacketType: types.IpCarrier,
-			Ip:         [16]byte(ipAddr),
-		}
-	case 4:
-		ipAddr.To16()
-		return ipPacket{
-			PacketType: types.IpCarrier,
-			Ip:         [16]byte(ipAddr),
-		}
-	default:
-		println("[ERR] slice size is not 16 nor 4, (is ", n, ")")
-		return ipPacket{}
+// A default constructor for creating an ID packet
+func NewIdPacket(id [16]byte) idPacket {
+	return idPacket{
+		PacketType: types.IdCarrier,
+		Id:         id,
 	}
 }
 
@@ -90,7 +62,7 @@ func (msgPacket messagePacket) Encode() (packet [8192]byte) {
 		p = append(p, 0) // 5
 	}
 
-	p = append(p, msgPacket.Ip[:]...) // 6...21 (22 свободно)
+	p = append(p, msgPacket.DestId[:]...) // 6...21 (22 свободно)
 	timeArr := [256]byte{}
 	byteTime := timeArr[0:0]
 	byteTime, err := msgPacket.Timestamp.AppendBinary(byteTime)
@@ -110,13 +82,13 @@ func (msgPacket messagePacket) Encode() (packet [8192]byte) {
 }
 
 // Create a new byte slice from the object, prepared for sending
-func (iPacket ipPacket) Encode() (packet [8192]byte) {
+func (iPacket idPacket) Encode() (packet [8192]byte) {
 
 	packetBuf := [21]byte{}
 	p := packetBuf[0:0]
 	p = append(p, signature...)
 	p = append(p, iPacket.PacketType)
-	p = append(p, iPacket.Ip[:]...)
+	p = append(p, iPacket.Id[:]...)
 	buf := [8192]byte{}
 	fullPacketBuf := [8192]byte{}
 	copy(fullPacketBuf[:], packetBuf[:])
@@ -127,7 +99,7 @@ func (iPacket ipPacket) Encode() (packet [8192]byte) {
 
 // Create a new byte slice from the variable, prepared for sending
 func (sigPacket SignalingPacket) Encode(packetType byte) (packet [8192]byte) {
-	if sigPacket == types.IpCarrier || sigPacket == types.Message {
+	if sigPacket == types.IdCarrier || sigPacket == types.Message {
 		println("[WARN] this type ", sigPacket, " shouldn't be in the SignalingPacket")
 		return packet
 	}
@@ -163,7 +135,7 @@ func DecodeMessage(packet [8192]byte) (msgPacket messagePacket, sign [4]byte) {
 	case 1:
 		msgPacket.IsOutgoung = true
 	}
-	copy(msgPacket.Ip[:], p[6:22])
+	copy(msgPacket.DestId[:], p[6:22])
 	timestampLen := binary.BigEndian.Uint16(p[22:24])
 	lenFrame := timestampLen + 24
 	msgPacket.Timestamp.UnmarshalBinary(p[24:lenFrame])
@@ -172,17 +144,17 @@ func DecodeMessage(packet [8192]byte) (msgPacket messagePacket, sign [4]byte) {
 	return
 }
 
-// Decode the IP packet to get the IPpacket and the signature
-func DecodeIP(packet [8192]byte) (iPacket ipPacket, sign [4]byte) {
+// Decode the ID packet to get the IDpacket and the signature
+func DecodeID(packet [8192]byte) (iPacket idPacket, sign [4]byte) {
 	buf := [8192]byte{}
 	XorMap(packet, &buf)
 	p := buf[:len(packet)]
 	for v := range 4 {
 		sign[v] = p[v]
 	}
-	iPacket = ipPacket{}
+	iPacket = idPacket{}
 	iPacket.PacketType = p[4]
-	copy(iPacket.Ip[:], p[5:21])
+	copy(iPacket.Id[:], p[5:21])
 	return
 }
 

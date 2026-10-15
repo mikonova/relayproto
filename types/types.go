@@ -2,12 +2,13 @@ package types
 
 const (
 	Message = iota
+	KeyTransmit
 	MessageReceived
 	RelayError
 	RelaySuccess
 	RelayTimeout
-	RequestIp
-	IpCarrier
+	RequestID
+	IdCarrier
 	OnReceiveConfirm
 	OnReceiveFail
 	ClientHello
