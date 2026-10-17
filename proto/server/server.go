@@ -26,3 +26,7 @@ func GetId(packet [8192]byte, buf *[20]byte) (packetType byte) {
 		return 0xFF
 	}
 }
+
+func GetType(packet [8192]byte) byte {
+	return packet[4] ^ 42
+}
